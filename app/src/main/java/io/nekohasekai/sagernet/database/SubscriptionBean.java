@@ -39,12 +39,16 @@ public class SubscriptionBean extends Serializable {
 
     public String subscriptionUserinfo;
 
+    // Optional case-insensitive regular expressions applied to subscription names on refresh.
+    public String nameInclude;
+    public String nameExclude;
+
     public SubscriptionBean() {
     }
 
     @Override
     public void serializeToBuffer(ByteBufferOutput output) {
-        output.writeInt(1);
+        output.writeInt(2);
 
         output.writeInt(type);
 
@@ -59,10 +63,12 @@ public class SubscriptionBean extends Serializable {
         output.writeInt(lastUpdated);
 
         output.writeString(subscriptionUserinfo);
+        output.writeString(nameInclude);
+        output.writeString(nameExclude);
     }
 
     public void serializeForShare(ByteBufferOutput output) {
-        output.writeInt(0);
+        output.writeInt(1);
 
         output.writeInt(type);
 
@@ -72,6 +78,8 @@ public class SubscriptionBean extends Serializable {
         output.writeBoolean(deduplication);
         output.writeBoolean(updateWhenConnectedOnly);
         output.writeString(customUserAgent);
+        output.writeString(nameInclude);
+        output.writeString(nameExclude);
     }
 
     @Override
@@ -88,6 +96,10 @@ public class SubscriptionBean extends Serializable {
         autoUpdateDelay = input.readInt();
         lastUpdated = input.readInt();
         subscriptionUserinfo = input.readString();
+        if (version >= 2) {
+            nameInclude = input.readString();
+            nameExclude = input.readString();
+        }
     }
 
     public void deserializeFromShare(ByteBufferInput input) {
@@ -99,6 +111,10 @@ public class SubscriptionBean extends Serializable {
         deduplication = input.readBoolean();
         updateWhenConnectedOnly = input.readBoolean();
         customUserAgent = input.readString();
+        if (version >= 1) {
+            nameInclude = input.readString();
+            nameExclude = input.readString();
+        }
     }
 
     @Override
@@ -120,6 +136,8 @@ public class SubscriptionBean extends Serializable {
         if (username == null) username = "";
         if (expiryDate == null) expiryDate = 0;
         if (protocols == null) protocols = new ArrayList<>();
+        if (nameInclude == null) nameInclude = "";
+        if (nameExclude == null) nameExclude = "";
     }
 
     public static final Creator<SubscriptionBean> CREATOR = new CREATOR<SubscriptionBean>() {

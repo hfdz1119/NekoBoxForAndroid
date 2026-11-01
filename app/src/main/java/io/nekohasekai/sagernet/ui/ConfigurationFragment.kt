@@ -58,6 +58,8 @@ import io.nekohasekai.sagernet.fmt.toUniversalLink
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.group.RawUpdater
 import io.nekohasekai.sagernet.ktx.FixedLinearLayoutManager
+import io.nekohasekai.sagernet.ktx.FixedGridLayoutManager
+import androidx.recyclerview.widget.GridLayoutManager
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.SubscriptionFoundException
 import io.nekohasekai.sagernet.ktx.alert
@@ -178,6 +180,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         if (!select) {
             toolbar.inflateMenu(R.menu.add_profile_menu)
             toolbar.setOnMenuItemClickListener(this)
+            toolbar.menu.findItem(R.id.action_layout)?.apply {
+                setTitle(if (DataStore.groupDoubleColumn) R.string.node_layout_single else R.string.node_layout_double)
+                setIcon(if (DataStore.groupDoubleColumn) R.drawable.ic_baseline_view_list_24 else R.drawable.ic_baseline_grid_3x3_24)
+            }
         } else {
             toolbar.setTitle(titleRes)
             toolbar.setNavigationIcon(R.drawable.ic_navigation_close)
@@ -345,6 +351,12 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     override fun onMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
+            R.id.action_layout -> {
+                DataStore.groupDoubleColumn = !DataStore.groupDoubleColumn
+                adapter.groupFragments.values.forEach { it.applyLayoutMode() }
+                item.setTitle(if (DataStore.groupDoubleColumn) R.string.node_layout_single else R.string.node_layout_double)
+                item.setIcon(if (DataStore.groupDoubleColumn) R.drawable.ic_baseline_view_list_24 else R.drawable.ic_baseline_grid_3x3_24)
+            }
             R.id.action_scan_qr_code -> {
                 startActivity(Intent(context, ScannerActivity::class.java))
             }
@@ -1075,6 +1087,13 @@ class ConfigurationFragment @JvmOverloads constructor(
         lateinit var layoutManager: LinearLayoutManager
         lateinit var configurationListView: RecyclerView
 
+        fun applyLayoutMode() {
+            if (!::configurationListView.isInitialized) return
+            val manager = configurationListView.layoutManager as? GridLayoutManager ?: return
+            val columns = if (!select && DataStore.groupDoubleColumn) 2 else 1
+            if (manager.spanCount != columns) manager.spanCount = columns
+        }
+
         val select by lazy {
             try {
                 (parentFragment as ConfigurationFragment).select
@@ -1158,7 +1177,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (!::proxyGroup.isInitialized) return
 
             configurationListView = view.findViewById(R.id.configuration_list)
-            layoutManager = FixedLinearLayoutManager(configurationListView)
+            layoutManager = FixedGridLayoutManager(configurationListView, if (!select && DataStore.groupDoubleColumn) 2 else 1)
             configurationListView.layoutManager = layoutManager
             adapter = ConfigurationAdapter()
             ProfileManager.addListener(adapter!!)
@@ -1485,6 +1504,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             val shareLayer: LinearLayout = view.findViewById(R.id.share_layer)
             val shareButton: ImageView = view.findViewById(R.id.shareIcon)
             val removeButton: ImageView = view.findViewById(R.id.remove)
+            val moreButton: ImageView = view.findViewById(R.id.more)
 
             fun bind(proxyEntity: ProxyEntity, trafficData: TrafficData? = null) {
                 val pf = parentFragment as? ConfigurationFragment ?: return
@@ -1608,9 +1628,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
 
                 val selectOrChain = select || proxyEntity.type == ProxyEntity.TYPE_CHAIN
-                shareLayout.isGone = selectOrChain
-                editButton.isGone = select
-                removeButton.isGone = select
+                val compact = !select && DataStore.groupDoubleColumn
+                shareLayout.isGone = selectOrChain || compact
+                editButton.isGone = select || compact
+                removeButton.isGone = select || compact
+                moreButton.isGone = !compact
 
                 proxyEntity.nekoBean?.apply {
                     shareLayout.isGone = true
@@ -1650,6 +1672,29 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                         popup.setOnMenuItemClickListener(this@ConfigurationHolder)
                         popup.show()
+                    }
+
+                    if (!select && DataStore.groupDoubleColumn) {
+                        onMainDispatcher {
+                            moreButton.setOnClickListener { anchor ->
+                                val popup = PopupMenu(requireContext(), anchor)
+                                popup.menuInflater.inflate(R.menu.profile_card_menu, popup.menu)
+                                if (proxyEntity.type == ProxyEntity.TYPE_CHAIN || proxyEntity.nekoBean != null) {
+                                    popup.menu.removeItem(R.id.action_card_share)
+                                }
+                                popup.menu.findItem(R.id.action_card_edit).isEnabled = !started
+                                popup.menu.findItem(R.id.action_card_remove).isEnabled = !started
+                                popup.setOnMenuItemClickListener { item ->
+                                    when (item.itemId) {
+                                        R.id.action_card_edit -> editButton.performClick()
+                                        R.id.action_card_share -> showShare(anchor)
+                                        R.id.action_card_remove -> removeButton.performClick()
+                                    }
+                                    true
+                                }
+                                popup.show()
+                            }
+                        }
                     }
 
                     if (!(select || proxyEntity.type == ProxyEntity.TYPE_CHAIN)) {

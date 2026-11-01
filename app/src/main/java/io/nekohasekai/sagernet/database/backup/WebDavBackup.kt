@@ -35,10 +35,10 @@ class WebDavBackup private constructor(
 
     fun check() = ensureDirectory()
 
-    fun upload(name: String, content: String) {
+    fun upload(name: String, content: ByteArray) {
         ensureDirectory()
         val url = fileUrl(name)
-        val request = request(url).put(content.toRequestBody(JSON)).build()
+        val request = request(url).put(content.toRequestBody(BINARY)).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw httpError(response.code)
         }
@@ -67,7 +67,7 @@ class WebDavBackup private constructor(
         }
     }
 
-    fun download(name: String): String {
+    fun download(name: String): ByteArray {
         val request = request(fileUrl(name)).get().build()
         return client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw httpError(response.code)
@@ -82,7 +82,7 @@ class WebDavBackup private constructor(
                     if (out.size() + count > MAX_BACKUP_BYTES) throw IOException("WebDAV backup is too large")
                     out.write(buffer, 0, count)
                 }
-                out.toString(Charsets.UTF_8.name())
+                out.toByteArray()
             }
         }
     }
@@ -144,9 +144,9 @@ class WebDavBackup private constructor(
     companion object {
         private const val MAX_LIST_BYTES = 2 * 1024 * 1024
         private const val MAX_BACKUP_BYTES = 32 * 1024 * 1024
-        private val SAFE_NAME = Regex("nekobox_backup_[0-9]{8}_[0-9]{6}\\.json")
+        private val SAFE_NAME = Regex("nekobox_backup_[0-9]{8}_[0-9]{6}\\.(?:json|enc)")
         private val XML = "application/xml; charset=utf-8".toMediaType()
-        private val JSON = "application/json; charset=utf-8".toMediaType()
+        private val BINARY = "application/octet-stream".toMediaType()
 
         fun create(serverUrl: String, username: String, password: String): WebDavBackup {
             val parsed = serverUrl.trim().toHttpUrlOrNull()

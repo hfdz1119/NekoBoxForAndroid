@@ -22,6 +22,7 @@ import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.Executable
 import io.nekohasekai.sagernet.database.*
 import io.nekohasekai.sagernet.database.backup.WebDavBackup
+import io.nekohasekai.sagernet.database.backup.WebDavBackupCipher
 import io.nekohasekai.sagernet.database.backup.WebDavConfigStore
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
@@ -335,15 +336,18 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         val profile = binding.backupConfigurations.isChecked
         val rules = binding.backupRules.isChecked
         val settings = binding.backupSettings.isChecked
-        runOnDefaultDispatcher {
-            try {
-                val data = doBackup(profile, rules, settings)
-                val filename = "nekobox_backup_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.json"
-                backup.upload(filename, data)
-                onMainDispatcher { snackbar(getString(R.string.webdav_backup_uploaded, filename)).show() }
-            } catch (e: Exception) {
-                Logs.w(e)
-                onMainDispatcher { snackbar(getString(R.string.webdav_backup_failed, e.readableMessage)).show() }
+        promptWebDavPassphrase(R.string.webdav_backup_passphrase, R.string.webdav_backup_passphrase_tip) { passphrase ->
+            runOnDefaultDispatcher {
+                try {
+                    val data = doBackup(profile, rules, settings)
+                    val encrypted = WebDavBackupCipher.encrypt(data, passphrase)
+                    val filename = "nekobox_backup_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.enc"
+                    backup.upload(filename, encrypted)
+                    onMainDispatcher { snackbar(getString(R.string.webdav_backup_uploaded, filename)).show() }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher { snackbar(getString(R.string.webdav_backup_failed, e.readableMessage)).show() }
+                }
             }
         }
     }
@@ -376,16 +380,45 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
     }
 
     private fun downloadWebDavBackup(backup: WebDavBackup, entry: WebDavBackup.Entry) {
-        runOnDefaultDispatcher {
-            try {
-                val content = JSONObject(backup.download(entry.name))
-                if (content.optInt("version", 0) != 1) throw IllegalArgumentException(getString(R.string.invalid_backup_file))
-                showImportContent(content)
-            } catch (e: Exception) {
-                Logs.w(e)
-                onMainDispatcher { snackbar(getString(R.string.webdav_restore_failed, e.readableMessage)).show() }
+        val encrypted = entry.name.endsWith(".enc")
+        val readBackup: (String?) -> Unit = { passphrase ->
+            runOnDefaultDispatcher {
+                try {
+                    val raw = WebDavBackupCipher.decryptOrRead(backup.download(entry.name), passphrase)
+                    val jsonContent = JSONObject(raw)
+                    if (jsonContent.optInt("version", 0) != 1) throw IllegalArgumentException(getString(R.string.invalid_backup_file))
+                    showImportContent(jsonContent)
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher { snackbar(getString(R.string.webdav_restore_failed, e.readableMessage)).show() }
+                }
             }
         }
+        if (encrypted) promptWebDavPassphrase(R.string.webdav_restore_passphrase, R.string.webdav_restore_passphrase_tip) { readBackup(it) }
+        else readBackup(null)
+    }
+
+    private fun promptWebDavPassphrase(title: Int, message: Int, onPassphrase: (String) -> Unit) {
+        val context = requireContext()
+        val input = EditText(context).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        val dialog = MaterialAlertDialogBuilder(context).setTitle(title).setMessage(message)
+            .setView(input).setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok, null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val passphrase = input.text.toString()
+                if (passphrase.length < 12) {
+                    input.error = getString(R.string.webdav_passphrase_too_short)
+                } else {
+                    dialog.dismiss()
+                    onPassphrase(passphrase)
+                }
+            }
+        }
+        dialog.show()
     }
 
     fun finishImport(

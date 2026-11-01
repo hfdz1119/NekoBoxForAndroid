@@ -60,6 +60,8 @@ class GroupSettingsActivity(
         DataStore.subscriptionUserAgent = subscription.customUserAgent
         DataStore.subscriptionAutoUpdate = subscription.autoUpdate
         DataStore.subscriptionAutoUpdateDelay = subscription.autoUpdateDelay
+        DataStore.subscriptionNameInclude = subscription.nameInclude
+        DataStore.subscriptionNameExclude = subscription.nameExclude
     }
 
     fun ProxyGroup.serialize() {
@@ -81,6 +83,8 @@ class GroupSettingsActivity(
                 customUserAgent = DataStore.subscriptionUserAgent
                 autoUpdate = DataStore.subscriptionAutoUpdate
                 autoUpdateDelay = DataStore.subscriptionAutoUpdateDelay
+                nameInclude = DataStore.subscriptionNameInclude
+                nameExclude = DataStore.subscriptionNameExclude
             }
         }
     }
@@ -159,6 +163,25 @@ class GroupSettingsActivity(
         subscriptionAutoUpdate.setOnPreferenceChangeListener { _, newValue ->
             subscriptionAutoUpdateDelay.isEnabled = (newValue as Boolean)
             true
+        }
+
+        for (key in listOf(Key.SUBSCRIPTION_NAME_INCLUDE, Key.SUBSCRIPTION_NAME_EXCLUDE)) {
+            findPreference<EditTextPreference>(key)?.apply {
+                setOnBindEditTextListener {
+                    it.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    it.setSingleLine(true)
+                }
+                setOnPreferenceChangeListener { _, newValue ->
+                    val pattern = (newValue as? String).orEmpty().trim()
+                    try {
+                        if (pattern.isNotEmpty()) java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE or java.util.regex.Pattern.UNICODE_CASE)
+                        true
+                    } catch (e: java.util.regex.PatternSyntaxException) {
+                        Toast.makeText(this@GroupSettingsActivity, getString(R.string.subscription_filter_invalid, e.description ?: ""), Toast.LENGTH_LONG).show()
+                        false
+                    }
+                }
+            }
         }
     }
 

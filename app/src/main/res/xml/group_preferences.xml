@@ -63,6 +63,18 @@
             app:summary="@string/deduplication_sum"
             app:title="@string/deduplication" />
 
+        <EditTextPreference
+            app:dialogMessage="@string/subscription_filter_include_tip"
+            app:icon="@drawable/ic_baseline_manage_search_24"
+            app:key="subscriptionNameInclude"
+            app:title="@string/subscription_filter_include" />
+
+        <EditTextPreference
+            app:dialogMessage="@string/subscription_filter_exclude_tip"
+            app:icon="@drawable/ic_baseline_manage_search_24"
+            app:key="subscriptionNameExclude"
+            app:title="@string/subscription_filter_exclude" />
+
     </PreferenceCategory>
 
     <PreferenceCategory

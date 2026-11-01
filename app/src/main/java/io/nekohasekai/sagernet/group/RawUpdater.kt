@@ -32,6 +32,8 @@ import org.yaml.snakeyaml.TypeDescription
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.error.YAMLException
 import java.io.StringReader
+import java.util.regex.Pattern
+import java.util.regex.PatternSyntaxException
 import androidx.core.net.toUri
 
 @Suppress("EXPERIMENTAL_API_USAGE")
@@ -84,6 +86,20 @@ object RawUpdater : GroupUpdater() {
                         proxyGroup.name = remoteName
                     }
                 }
+            }
+        }
+
+        val includePattern = compileNameFilter(subscription.nameInclude, proxyGroup.name ?: "")
+        val excludePattern = compileNameFilter(subscription.nameExclude, proxyGroup.name ?: "")
+        if (includePattern != null || excludePattern != null) {
+            val beforeFilter = proxies.size
+            proxies = proxies.filter { bean ->
+                val name = bean.displayName()
+                (includePattern == null || includePattern.matcher(name).find()) &&
+                    (excludePattern == null || !excludePattern.matcher(name).find())
+            }
+            if (beforeFilter > 0 && proxies.isEmpty()) {
+                throw IllegalStateException(app.getString(R.string.subscription_filter_empty_result))
             }
         }
 
@@ -805,6 +821,18 @@ object RawUpdater : GroupUpdater() {
 
         proxies.forEach { it.initializeDefaultValues() }
         return proxies
+    }
+
+
+    private fun compileNameFilter(value: String?, group: String): Pattern? {
+        val pattern = value?.trim().orEmpty()
+        if (pattern.isEmpty()) return null
+        return try {
+            Pattern.compile(pattern, Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE)
+        } catch (e: PatternSyntaxException) {
+            Logs.w("$group: invalid subscription filter '$pattern': ${e.description}")
+            null
+        }
     }
 
 }
