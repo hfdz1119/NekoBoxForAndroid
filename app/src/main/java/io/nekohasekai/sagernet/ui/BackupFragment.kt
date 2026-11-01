@@ -6,6 +6,9 @@ import android.os.Bundle
 import android.os.Parcel
 import android.os.Parcelable
 import android.provider.OpenableColumns
+import android.text.InputType
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -18,6 +21,8 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.Executable
 import io.nekohasekai.sagernet.database.*
+import io.nekohasekai.sagernet.database.backup.WebDavBackup
+import io.nekohasekai.sagernet.database.backup.WebDavConfigStore
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.databinding.LayoutBackupBinding
@@ -29,6 +34,7 @@ import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
 import java.util.*
 
 class BackupFragment : NamedFragment(R.layout.layout_backup) {
@@ -122,6 +128,10 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         binding.actionImportFile.setOnClickListener {
             startFilesForResult(importFile, "*/*")
         }
+
+        binding.actionWebdavSettings.setOnClickListener { showWebDavSettings() }
+        binding.actionWebdavBackup.setOnClickListener { uploadWebDavBackup(binding) }
+        binding.actionWebdavRestore.setOnClickListener { chooseWebDavBackup() }
     }
 
     fun Parcelable.toBase64Str(): String {
@@ -214,51 +224,167 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             return
         }
 
-        onMainDispatcher {
-            val import = LayoutImportBinding.inflate(layoutInflater)
-            if (!content.has("profiles")) {
-                import.backupConfigurations.isVisible = false
-            }
-            if (!content.has("rules")) {
-                import.backupRules.isVisible = false
-            }
-            if (!content.has("settings")) {
-                import.backupSettings.isVisible = false
-            }
-            MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.backup_import)
-                .setView(import.root)
-                .setPositiveButton(R.string.backup_import) { _, _ ->
-                    SagerNet.stopService()
+        showImportContent(content)
+    }
 
-                    val binding = LayoutProgressBinding.inflate(layoutInflater)
-                    binding.content.text = getString(R.string.backup_importing)
-                    val dialog = AlertDialog.Builder(requireContext())
-                        .setView(binding.root)
-                        .setCancelable(false)
-                        .show()
-                    runOnDefaultDispatcher {
-                        runCatching {
-                            finishImport(
-                                content,
-                                import.backupConfigurations.isChecked,
-                                import.backupRules.isChecked,
-                                import.backupSettings.isChecked
-                            )
-                            triggerFullRestart(requireContext())
-                        }.onFailure {
-                            Logs.w(it)
-                            onMainDispatcher {
-                                alert(it.readableMessage).tryToShow()
-                            }
-                        }
+    private suspend fun showImportContent(content: JSONObject) = onMainDispatcher {
+        val import = LayoutImportBinding.inflate(layoutInflater)
+        if (!content.has("profiles")) import.backupConfigurations.isVisible = false
+        if (!content.has("rules")) import.backupRules.isVisible = false
+        if (!content.has("settings")) import.backupSettings.isVisible = false
+        MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.backup_import)
+            .setView(import.root)
+            .setPositiveButton(R.string.backup_import) { _, _ ->
+                SagerNet.stopService()
+                val binding = LayoutProgressBinding.inflate(layoutInflater)
+                binding.content.text = getString(R.string.backup_importing)
+                val dialog = AlertDialog.Builder(requireContext())
+                    .setView(binding.root)
+                    .setCancelable(false)
+                    .show()
+                runOnDefaultDispatcher {
+                    runCatching {
+                        finishImport(
+                            content,
+                            import.backupConfigurations.isChecked,
+                            import.backupRules.isChecked,
+                            import.backupSettings.isChecked
+                        )
+                        triggerFullRestart(requireContext())
+                    }.onFailure {
+                        Logs.w(it)
+                        onMainDispatcher { alert(it.readableMessage).tryToShow() }
+                    }
+                    onMainDispatcher { dialog.dismiss() }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
 
+    private fun showWebDavSettings() {
+        val context = requireContext()
+        val current = runCatching { WebDavConfigStore.load(context) }.getOrElse {
+            Logs.w(it)
+            snackbar(it.readableMessage).show()
+            null
+        }
+        val form = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 8, 48, 0)
+        }
+        fun field(hint: Int, value: String = "", inputType: Int): EditText = EditText(context).apply {
+            this.hint = getString(hint)
+            this.inputType = inputType
+            setSingleLine(true)
+            setText(value)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        val server = field(R.string.webdav_server, current?.serverUrl.orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        val username = field(R.string.webdav_username, current?.username.orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        val password = field(R.string.webdav_password, current?.password.orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        form.addView(server); form.addView(username); form.addView(password)
+        val dialog = MaterialAlertDialogBuilder(context).setTitle(R.string.webdav_settings)
+            .setMessage(R.string.webdav_security_note)
+            .setView(form)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok, null)
+            .create()
+        dialog.setOnShowListener {
+            val saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            saveButton.setOnClickListener {
+                val config = WebDavConfigStore.Config(
+                    server.text.toString().trim(), username.text.toString(), password.text.toString()
+                )
+                saveButton.isEnabled = false
+                runOnDefaultDispatcher {
+                    try {
+                        WebDavBackup.create(config.serverUrl, config.username, config.password).check()
+                        WebDavConfigStore.save(context, config)
                         onMainDispatcher {
+                            snackbar(getString(R.string.webdav_credentials_saved)).show()
                             dialog.dismiss()
+                        }
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                        onMainDispatcher {
+                            saveButton.isEnabled = true
+                            snackbar(e.readableMessage).show()
                         }
                     }
                 }
-                .setNegativeButton(android.R.string.cancel, null)
-                .show()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun webDavConfig(): WebDavConfigStore.Config? = try {
+        WebDavConfigStore.load(requireContext()) ?: run {
+            snackbar(getString(R.string.webdav_configure_first)).show()
+            null
+        }
+    } catch (e: Exception) {
+        Logs.w(e)
+        snackbar(e.readableMessage).show()
+        null
+    }
+
+    private fun uploadWebDavBackup(binding: LayoutBackupBinding) {
+        val config = webDavConfig() ?: return
+        val backup = WebDavBackup.create(config.serverUrl, config.username, config.password)
+        val profile = binding.backupConfigurations.isChecked
+        val rules = binding.backupRules.isChecked
+        val settings = binding.backupSettings.isChecked
+        runOnDefaultDispatcher {
+            try {
+                val data = doBackup(profile, rules, settings)
+                val filename = "nekobox_backup_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.json"
+                backup.upload(filename, data)
+                onMainDispatcher { snackbar(getString(R.string.webdav_backup_uploaded, filename)).show() }
+            } catch (e: Exception) {
+                Logs.w(e)
+                onMainDispatcher { snackbar(getString(R.string.webdav_backup_failed, e.readableMessage)).show() }
+            }
+        }
+    }
+
+    private fun chooseWebDavBackup() {
+        val config = webDavConfig() ?: return
+        val backup = WebDavBackup.create(config.serverUrl, config.username, config.password)
+        runOnDefaultDispatcher {
+            try {
+                val entries = backup.list()
+                onMainDispatcher {
+                    if (entries.isEmpty()) {
+                        snackbar(getString(R.string.webdav_no_backups)).show()
+                    } else {
+                        val labels = entries.map { if (it.modified.isBlank()) it.name else "${it.name}  (${it.modified})" }
+                        MaterialAlertDialogBuilder(requireContext())
+                            .setTitle(R.string.webdav_choose_backup)
+                            .setItems(labels.toTypedArray()) { _, which ->
+                                downloadWebDavBackup(backup, entries[which])
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
+                    }
+                }
+            } catch (e: Exception) {
+                Logs.w(e)
+                onMainDispatcher { snackbar(getString(R.string.webdav_restore_failed, e.readableMessage)).show() }
+            }
+        }
+    }
+
+    private fun downloadWebDavBackup(backup: WebDavBackup, entry: WebDavBackup.Entry) {
+        runOnDefaultDispatcher {
+            try {
+                val content = JSONObject(backup.download(entry.name))
+                if (content.optInt("version", 0) != 1) throw IllegalArgumentException(getString(R.string.invalid_backup_file))
+                showImportContent(content)
+            } catch (e: Exception) {
+                Logs.w(e)
+                onMainDispatcher { snackbar(getString(R.string.webdav_restore_failed, e.readableMessage)).show() }
+            }
         }
     }
 

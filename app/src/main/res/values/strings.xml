@@ -484,6 +484,20 @@
     <string name="mtu" translatable="false">MTU</string>
 
     <string name="backup">Backup</string>
+    <string name="webdav_settings">WebDAV settings</string>
+    <string name="webdav_server">HTTPS WebDAV URL</string>
+    <string name="webdav_username">Username</string>
+    <string name="webdav_password">Password</string>
+    <string name="webdav_credentials_saved">WebDAV settings saved</string>
+    <string name="webdav_configure_first">Configure WebDAV first</string>
+    <string name="backup_to_webdav">Back up to WebDAV</string>
+    <string name="restore_from_webdav">Restore from WebDAV</string>
+    <string name="webdav_choose_backup">Choose a remote backup</string>
+    <string name="webdav_no_backups">No NekoBox backups found on this WebDAV server</string>
+    <string name="webdav_backup_uploaded">Backup uploaded: %1$s</string>
+    <string name="webdav_backup_failed">WebDAV backup failed: %1$s</string>
+    <string name="webdav_restore_failed">WebDAV restore failed: %1$s</string>
+    <string name="webdav_security_note">Remote backups may contain proxy credentials. Use a trusted HTTPS WebDAV server.</string>
     <string name="backup_groups_and_configurations">Groups and configurations</string>
     <string name="backup_rules">Routing rules</string>
     <string name="backup_settings">Settings</string>
