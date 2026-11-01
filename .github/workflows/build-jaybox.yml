@@ -1,0 +1,127 @@
+name: Build signed JayBox APKs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify signed OSS APKs
+    runs-on: ubuntu-latest
+    env:
+      BUILD_PLUGIN: none
+    steps:
+      - name: Require the JayBox branch
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" != "jaybox" ]]; then
+            echo "::error::Run this workflow with the jaybox branch selected."
+            exit 1
+          fi
+
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Go for libcore
+        uses: actions/setup-go@v5
+        with:
+          go-version: '^1.25'
+
+      - name: Check signing secrets and prepare temporary keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required GitHub Actions secret: ${name}"
+              exit 1
+            fi
+          done
+
+          key_path="${RUNNER_TEMP}/jaybox-release.jks"
+          if [[ -e "$key_path" ]]; then
+            echo "::error::Refusing to overwrite an existing temporary JayBox keystore."
+            exit 1
+          fi
+          if ! printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$key_path"; then
+            echo "::error::KEYSTORE_BASE64 could not be decoded."
+            exit 1
+          fi
+          chmod 600 "$key_path"
+          if [[ ! -s "$key_path" ]]; then
+            echo "::error::Decoded JayBox keystore is empty."
+            exit 1
+          fi
+          if ! keytool -list -keystore "$key_path" \
+              -storepass:env KEYSTORE_PASSWORD -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::The decoded keystore cannot be opened with the supplied password and alias."
+            exit 1
+          fi
+          echo "RELEASE_KEYSTORE_FILE=$key_path" >> "$GITHUB_ENV"
+
+      - name: Build native libcore
+        run: ./run lib core
+
+      - name: Build, verify identity and signature
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          printf 'sdk.dir=%s\nndk.dir=%s/ndk/25.0.8775105\n' "$ANDROID_HOME" "$ANDROID_HOME" > local.properties
+          ./run init action gradle
+          ./gradlew --no-daemon app:assembleOssRelease
+
+          build_tools="$ANDROID_HOME/build-tools/35.0.1"
+          if [[ ! -x "$build_tools/apksigner" || ! -x "$build_tools/aapt" ]]; then
+            echo "::error::Android build-tools 35.0.1 (apksigner and aapt) are unavailable."
+            exit 1
+          fi
+
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/oss/release/*.apk)
+          if (( ${#apks[@]} == 0 )); then
+            echo "::error::Gradle completed without producing OSS Release APKs."
+            exit 1
+          fi
+          mkdir -p jaybox-artifacts
+          for apk in "${apks[@]}"; do
+            if ! "$build_tools/apksigner" verify --verbose "$apk" >/dev/null 2>&1; then
+              echo "::error::APK signature verification failed for $(basename "$apk")."
+              exit 1
+            fi
+            package_id=$("$build_tools/aapt" dump badging "$apk" | awk -F"'" '/^package: name=/ {print $2; exit}')
+            if [[ "$package_id" != "top.hfdz1119.jaybox" ]]; then
+              echo "::error::Unexpected APK applicationId in $(basename "$apk"): ${package_id:-missing}"
+              exit 1
+            fi
+            cp "$apk" jaybox-artifacts/
+          done
+
+      - name: Remove temporary signing key
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/jaybox-release.jks"
+
+      - name: Upload verified JayBox APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: jaybox-1.4.3-apks
+          path: jaybox-artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 30

@@ -3,6 +3,8 @@ import com.android.build.gradle.AbstractAppExtension
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 import org.gradle.api.JavaVersion
 import org.gradle.api.Project
+import org.gradle.api.execution.TaskExecutionGraph
+import org.gradle.api.execution.TaskExecutionGraphListener
 import org.gradle.api.plugins.ExtensionAware
 import org.gradle.kotlin.dsl.getByName
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmOptions
@@ -114,31 +116,48 @@ fun Project.setupCommon() {
 fun Project.setupAppCommon() {
     setupCommon()
 
-    val lp = requireLocalProperties()
-    val keystorePwd = lp.getProperty("KEYSTORE_PASS") ?: System.getenv("KEYSTORE_PASS")
-    val alias = lp.getProperty("ALIAS_NAME") ?: System.getenv("ALIAS_NAME")
-    val pwd = lp.getProperty("ALIAS_PASS") ?: System.getenv("ALIAS_PASS")
+    // JayBox release signing is opt-in via environment variables. In particular, never
+    // replace Android's default debug signing key with a release keystore.
+    val keystorePath = System.getenv("RELEASE_KEYSTORE_FILE")
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("KEY_ALIAS")
+    val keyPassword = System.getenv("KEY_PASSWORD")
+    val signingValues = listOf(keystorePath, keystorePassword, releaseKeyAlias, keyPassword)
+    val hasReleaseSigning = signingValues.all { !it.isNullOrBlank() }
 
     android.apply {
-        if (keystorePwd != null && alias != null && pwd != null) {
+        if (hasReleaseSigning) {
             signingConfigs {
-                create("release") {
-                    val keystorePath = System.getenv("RELEASE_KEYSTORE_FILE") ?: "release.keystore"
-                    storeFile = rootProject.file(keystorePath)
-                    storePassword = keystorePwd
-                    keyAlias = alias
-                    keyPassword = pwd
+                create("jayboxRelease") {
+                    storeFile = rootProject.file(requireNotNull(keystorePath))
+                    storePassword = requireNotNull(keystorePassword)
+                    keyAlias = requireNotNull(releaseKeyAlias)
+                    this.keyPassword = requireNotNull(keyPassword)
                 }
             }
-        }
-        buildTypes {
-            val key = signingConfigs.findByName("release")
-            if (key != null) {
-                getByName("release").signingConfig = key
-                getByName("debug").signingConfig = key
-            }
+            buildTypes.getByName("release").signingConfig = signingConfigs.getByName("jayboxRelease")
         }
     }
+
+    // Keep Gradle sync, Debug builds and unit tests usable without signing secrets, but
+    // fail any APK/AAB Release packaging task rather than silently emitting unsigned output.
+    gradle.taskGraph.addTaskExecutionGraphListener(object : TaskExecutionGraphListener {
+        override fun graphPopulated(graph: TaskExecutionGraph) {
+            val packagingReleaseRequested = graph.allTasks.any { task ->
+                task.name.contains("Release") &&
+                    (task.name.startsWith("assemble") || task.name.startsWith("bundle") ||
+                        task.name.startsWith("package") || task.name.startsWith("validateSigning"))
+            }
+            if (packagingReleaseRequested && !hasReleaseSigning) {
+                throw org.gradle.api.GradleException(
+                    "JayBox Release packaging requires RELEASE_KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD."
+                )
+            }
+            if (packagingReleaseRequested && !rootProject.file(requireNotNull(keystorePath)).isFile) {
+                throw org.gradle.api.GradleException("JayBox Release keystore file was not found.")
+            }
+        }
+    })
 }
 
 fun Project.setupApp() {
@@ -198,10 +217,10 @@ fun Project.setupApp() {
                 outputFileName = if (isPreview) {
                     outputFileName.replace(
                         project.name,
-                        "NekoBox-" + requireMetadata().getProperty("PRE_VERSION_NAME")
+                        "JayBox-" + requireMetadata().getProperty("PRE_VERSION_NAME")
                     ).replace("-preview", "")
                 } else {
-                    outputFileName.replace(project.name, "NekoBox-$versionName")
+                    outputFileName.replace(project.name, "JayBox-$versionName")
                         .replace("-release", "")
                         .replace("-oss", "")
                 }
