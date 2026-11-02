@@ -81,17 +81,14 @@
     </item>
 
     <item
-        android:id="@+id/action_layout"
-        android:icon="@drawable/ic_baseline_grid_3x3_24"
-        android:title="@string/node_layout_double"
-        app:showAsAction="ifRoom" />
-
-    <item
         android:id="@+id/action_misc"
         android:icon="@drawable/ic_baseline_more_vert_24"
         android:title="@string/more_options"
         app:showAsAction="never">
         <menu>
+            <item
+                android:id="@+id/action_layout"
+                android:title="@string/node_layout_double" />
             <item
                 android:id="@+id/action_update_subscription"
                 android:title="@string/update_current_subscription" />

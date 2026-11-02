@@ -123,7 +123,7 @@ jobs:
       - name: Upload verified JayBox APKs
         uses: actions/upload-artifact@v4
         with:
-          name: jaybox-1.4.3-apks
+          name: jaybox-1.4.4-apks
           path: jaybox-artifacts/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -131,8 +131,9 @@ jobs:
       - name: Publish JayBox GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.4.3-b${{ github.run_number }}
-          name: 'JayBox v1.4.3 (Build #${{ github.run_number }})'
+          tag_name: v1.4.4-b${{ github.run_number }}
+          name: 'JayBox v1.4.4 (Build #${{ github.run_number }})'
+          body_path: RELEASE_NOTES_1.4.4.md
           files: jaybox-artifacts/*.apk
           draft: false
           prerelease: false
