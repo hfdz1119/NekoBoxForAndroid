@@ -1,0 +1,58 @@
+name: Generate JayBox signing key
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate private JayBox JKS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the JayBox branch
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" != "jaybox" ]]; then
+            echo "::error::Run this workflow with the jaybox branch selected."
+            exit 1
+          fi
+
+      - name: Generate JKS without overwriting an existing file
+        shell: bash
+        env:
+          JAYBOX_KEYSTORE_PASSWORD: ${{ secrets.JAYBOX_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${JAYBOX_KEYSTORE_PASSWORD:-}" ]]; then
+            echo "::error::Add the JAYBOX_KEYSTORE_PASSWORD Actions secret before running this workflow."
+            exit 1
+          fi
+
+          key_path="${RUNNER_TEMP}/jaybox-release.jks"
+          if [[ -e "$key_path" ]]; then
+            echo "::error::Refusing to overwrite an existing jaybox-release.jks in the runner workspace."
+            exit 1
+          fi
+
+          keytool -genkeypair -noprompt \
+            -keystore "$key_path" \
+            -storetype JKS \
+            -alias jaybox \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=JayBox" \
+            -storepass:env JAYBOX_KEYSTORE_PASSWORD \
+            -keypass:env JAYBOX_KEYSTORE_PASSWORD
+          chmod 600 "$key_path"
+          test -s "$key_path"
+
+      - name: Upload temporary key artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jaybox-signing-key
+          path: ${{ runner.temp }}/jaybox-release.jks
+          if-no-files-found: error
+          retention-days: 7
