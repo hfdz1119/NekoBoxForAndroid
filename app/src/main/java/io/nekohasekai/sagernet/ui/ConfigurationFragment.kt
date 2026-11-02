@@ -1091,7 +1091,11 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (!::configurationListView.isInitialized) return
             val manager = configurationListView.layoutManager as? GridLayoutManager ?: return
             val columns = if (!select && DataStore.groupDoubleColumn) 2 else 1
-            if (manager.spanCount != columns) manager.spanCount = columns
+            if (manager.spanCount != columns) {
+                manager.spanCount = columns
+                // The card controls also change between compact and full layouts.
+                adapter?.notifyDataSetChanged()
+            }
         }
 
         val select by lazy {
