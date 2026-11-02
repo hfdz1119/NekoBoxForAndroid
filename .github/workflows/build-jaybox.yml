@@ -10,6 +10,8 @@ jobs:
   build:
     name: Build and verify signed OSS APKs
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       BUILD_PLUGIN: none
     steps:
@@ -125,3 +127,12 @@ jobs:
           path: jaybox-artifacts/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish JayBox GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.4.3-b${{ github.run_number }}
+          name: 'JayBox v1.4.3 (Build #${{ github.run_number }})'
+          files: jaybox-artifacts/*.apk
+          draft: false
+          prerelease: false
